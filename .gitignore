@@ -26,6 +26,7 @@ data/raw/*
 # ── MLflow ────────────────────────────────────────────────────────────────────
 mlruns/
 mlflow-artifacts/
+mlflow.db
 
 # ── Saved models / job artefacts ─────────────────────────────────────────────
 # Ignore everything under artifacts/ by default (contents, not the dir itself)
