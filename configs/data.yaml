@@ -1,0 +1,55 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Data pipeline configuration — paths, split ratios, column schema
+# Source of truth for column groupings consumed by schema.py
+# ─────────────────────────────────────────────────────────────────────────────
+
+paths:
+  raw_csv: "data/raw/WA_Fn-UseC_-Telco-Customer-Churn.csv"
+  processed_dir: "data/processed"
+  train_file: "train.parquet"
+  val_file: "val.parquet"
+  test_file: "test.parquet"
+
+splits:
+  train: 0.70
+  val:   0.15
+  test:  0.15
+  seed:  42       # overridden by settings.random_seed at runtime
+
+schema:
+  id_col: "customerID"
+
+  # Raw target column (Yes/No string) and its encoded integer version
+  target_raw: "Churn"
+  target_col: "churn"
+
+  # Already-numeric columns
+  numeric_cols:
+    - "tenure"
+    - "MonthlyCharges"
+    - "TotalCharges"
+
+  # Columns that are 0/1 integers in the raw CSV (no string encoding needed)
+  integer_binary_cols:
+    - "SeniorCitizen"
+
+  # Yes/No string columns (encoded to 1/0 during cleaning)
+  binary_yn_cols:
+    - "Partner"
+    - "Dependents"
+    - "PhoneService"
+    - "PaperlessBilling"
+
+  # Multi-class categorical columns (one-hot encoding deferred to model pipeline)
+  categorical_cols:
+    - "gender"
+    - "MultipleLines"
+    - "InternetService"
+    - "OnlineSecurity"
+    - "OnlineBackup"
+    - "DeviceProtection"
+    - "TechSupport"
+    - "StreamingTV"
+    - "StreamingMovies"
+    - "Contract"
+    - "PaymentMethod"
