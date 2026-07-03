@@ -1,0 +1,18 @@
+# MLflow tracking server with psycopg2 for PostgreSQL backend.
+# Built on the official MLflow image; adds psycopg2-binary so MLflow
+# can write to the postgres `mlflow` database.
+FROM python:3.11-slim
+
+ARG MLFLOW_VERSION=2.13.2
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+    mlflow==${MLFLOW_VERSION} \
+    psycopg2-binary \
+    boto3
+
+EXPOSE 5000
+
+ENTRYPOINT ["mlflow", "server", "--host", "0.0.0.0", "--port", "5000"]

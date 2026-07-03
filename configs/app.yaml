@@ -1,0 +1,26 @@
+# Non-secret configuration: topic names, ports, seed, paths
+# Secrets (passwords, tokens) must live in .env — see .env.example
+
+project:
+  raw_data_dir: "data/raw"
+  processed_data_dir: "data/processed"
+  artifacts_dir: "artifacts"
+
+random_seed: 42
+
+kafka:
+  bootstrap_servers: "localhost:9092"
+  topics:
+    raw_customers: "telco.raw.customers"
+    predictions: "telco.churn.predictions"
+    deadletter: "telco.deadletter"
+
+mlflow:
+  tracking_uri: "http://localhost:3000"
+
+postgres:
+  host: "localhost"
+  port: 5433
+  mlflow_db: "mlflow"
+  airflow_db: "airflow"
+  churnops_db: "churnops"

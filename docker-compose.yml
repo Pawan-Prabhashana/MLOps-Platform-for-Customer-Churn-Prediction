@@ -1,0 +1,189 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Named volumes for persistence across restarts
+# ─────────────────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+  mlflow_artifacts:
+  airflow_logs:
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shared environment for Airflow containers
+# ─────────────────────────────────────────────────────────────────────────────
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.9.2-python3.11
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://churnops:churnops_secret@postgres:5432/airflow
+    AIRFLOW__CORE__FERNET_KEY: "81HqDtbqAywKSOumSha3BhWNOdQ26slT6K0YaZeZyPs="
+    AIRFLOW__WEBSERVER__SECRET_KEY: "churnops-local-dev-secret"
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__LOGGING__BASE_LOG_FOLDER: /opt/airflow/logs
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - airflow_logs:/opt/airflow/logs
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  # ───────────────────────────────────────────────────────────────────────────
+  # 1. PostgreSQL 16 — creates mlflow / airflow / churnops databases via init
+  # ───────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16
+    container_name: churnops-postgres
+    environment:
+      POSTGRES_USER: churnops
+      POSTGRES_PASSWORD: churnops_secret
+      POSTGRES_DB: churnops
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init-dbs.sh:/docker-entrypoint-initdb.d/init-dbs.sh:ro
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U churnops -d churnops"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 2. Kafka in KRaft mode (single broker, no ZooKeeper)
+  # ───────────────────────────────────────────────────────────────────────────
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: churnops-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      # Two listeners: EXTERNAL for host-machine clients (port 9092),
+      #                INTERNAL for container-to-container traffic (port 29092)
+      KAFKA_LISTENERS: EXTERNAL://0.0.0.0:9092,INTERNAL://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: EXTERNAL://localhost:9092,INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: EXTERNAL:PLAINTEXT,INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # One-shot container: creates the three required topics after Kafka is healthy
+  kafka-init:
+    image: apache/kafka:3.7.0
+    container_name: churnops-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Creating Kafka topics..."
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists \
+          --bootstrap-server kafka:29092 \
+          --replication-factor 1 --partitions 3 \
+          --topic telco.raw.customers
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists \
+          --bootstrap-server kafka:29092 \
+          --replication-factor 1 --partitions 3 \
+          --topic telco.churn.predictions
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists \
+          --bootstrap-server kafka:29092 \
+          --replication-factor 1 --partitions 1 \
+          --topic telco.deadletter
+        echo "Topics created successfully."
+        /opt/kafka/bin/kafka-topics.sh --list --bootstrap-server kafka:29092
+    restart: "no"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 3. MLflow tracking server — custom image with psycopg2
+  #    Internal port 5000 published on host 3000
+  # ───────────────────────────────────────────────────────────────────────────
+  mlflow:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.mlflow
+    image: churnops-mlflow:local
+    container_name: churnops-mlflow
+    command:
+      - "--backend-store-uri"
+      - "postgresql+psycopg2://churnops:churnops_secret@postgres:5432/mlflow"
+      - "--default-artifact-root"
+      - "/mlflow/artifacts"
+      - "--serve-artifacts"
+    volumes:
+      - mlflow_artifacts:/mlflow/artifacts
+    ports:
+      - "3000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5000/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 45s
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 4. Airflow — db migrate + admin user creation (one-shot)
+  # ───────────────────────────────────────────────────────────────────────────
+  airflow-init:
+    <<: *airflow-common
+    container_name: churnops-airflow-init
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        airflow db migrate
+        airflow users create \
+          --username admin \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@churnops.local \
+          --password admin || true
+        echo "Airflow init complete."
+    restart: "no"
+
+  # Airflow webserver — host port 8080
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: churnops-airflow-webserver
+    command: webserver
+    ports:
+      - "8080:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # Airflow scheduler
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: churnops-airflow-scheduler
+    command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$(hostname)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
