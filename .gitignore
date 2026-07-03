@@ -46,6 +46,12 @@ spark-warehouse/
 metastore_db/
 derby.log
 
+# ── Kafka producer ────────────────────────────────────────────────────────────
+# Checkpoint file (runtime state, not source code)
+artifacts/producer_checkpoint.json
+# Producer run logs (if redirected to a file)
+producer_*.log
+
 # ── Logs ─────────────────────────────────────────────────────────────────────
 logs/
 *.log

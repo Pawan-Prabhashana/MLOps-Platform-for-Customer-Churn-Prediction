@@ -1,0 +1,28 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Kafka producer / consumer operational configuration.
+# Non-secret settings only — bootstrap.servers and topic names live in app.yaml
+# so they are also exposed through the pydantic Settings object.
+# ─────────────────────────────────────────────────────────────────────────────
+
+producer:
+  # Default throughput for streaming mode (messages per second).
+  events_per_sec: 10
+
+  # Number of rows per flush chunk in batch mode.
+  batch_size: 500
+
+  # Producer reliability settings (passed straight to confluent-kafka).
+  acks: "all"          # wait for full ISR acknowledgement
+  linger_ms: 5         # small batching window (ms) for throughput
+  compression_type: "gzip"
+
+  # Progress log every N messages (both modes).
+  progress_every: 100
+
+  # Checkpoint file for batch-mode resume (relative to repo root).
+  # Stores the last absolute row index successfully delivered.
+  checkpoint_file: "artifacts/producer_checkpoint.json"
+
+  # Dead-letter topic for producer-side delivery failures (minimal; main
+  # dead-letter logic lives on the consumer side).
+  dead_letter_topic: "telco.deadletter"
