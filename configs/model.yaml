@@ -44,3 +44,30 @@ thresholds:
   roc_auc: 0.80
   pr_auc:  0.55
   recall:  0.55
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MLflow tracking & registry settings
+# ─────────────────────────────────────────────────────────────────────────────
+mlflow:
+  # Tracking server URI — overridden by MLFLOW_TRACKING_URI env var or config.py
+  tracking_uri: "http://localhost:3000"
+
+  # Experiment all churn runs are logged to
+  experiment_name: "churn-sklearn"
+
+  # Registered model name in the Model Registry
+  registered_model_name: "churn-classifier"
+
+  # Metric used to compare versions and decide promotion (must be a logged test metric)
+  promotion_metric: "test_roc_auc"
+
+  # Aliases (modern API — no stage transitions)
+  aliases:
+    staging:    "staging"
+    production: "production"
+
+  # Log plots as artifacts?
+  log_plots: true
+
+  # Dataset version tag (bump when features or splits change)
+  dataset_version: "v1"

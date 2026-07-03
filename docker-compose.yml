@@ -119,9 +119,13 @@ services:
     command:
       - "--backend-store-uri"
       - "postgresql+psycopg2://churnops:churnops_secret@postgres:5432/mlflow"
-      - "--default-artifact-root"
+      - "--artifacts-destination"
       - "/mlflow/artifacts"
       - "--serve-artifacts"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "5000"
     volumes:
       - mlflow_artifacts:/mlflow/artifacts
     ports:

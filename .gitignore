@@ -26,6 +26,7 @@ data/raw/*
 # ── MLflow ────────────────────────────────────────────────────────────────────
 mlruns/
 mlflow-artifacts/
+artifacts/plots/
 
 # ── Saved models / job artefacts ─────────────────────────────────────────────
 artifacts/
