@@ -52,6 +52,13 @@ artifacts/producer_checkpoint.json
 # Producer run logs (if redirected to a file)
 producer_*.log
 
+# ── Kafka consumer ────────────────────────────────────────────────────────────
+# Generated batch-summary reports (runtime artifacts, regenerated each run)
+artifacts/reports/batch_summary.json
+artifacts/reports/batch_summary.md
+# Consumer run logs (if redirected to a file)
+consumer_*.log
+
 # ── Logs ─────────────────────────────────────────────────────────────────────
 logs/
 *.log

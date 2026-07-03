@@ -26,3 +26,42 @@ producer:
   # Dead-letter topic for producer-side delivery failures (minimal; main
   # dead-letter logic lives on the consumer side).
   dead_letter_topic: "telco.deadletter"
+
+consumer:
+  # Consumer group id (offsets tracked per group).
+  group_id: "churnops-consumer"
+
+  # Where to start when the group has no committed offset yet.
+  auto_offset_reset: "earliest"
+
+  # Decision threshold on P(churn): prob >= threshold -> "Yes".
+  threshold: 0.5
+
+  # Emit the input's ground-truth Churn as "actual_churn" in the output
+  # (lets the monitoring layer later compare prediction vs truth).
+  include_ground_truth: true
+
+  # Default model source for scoring ("registry" -> MLflow production alias,
+  # "joblib" -> local artifact). Registry falls back to joblib if unreachable.
+  model_source: "registry"
+
+  # Poll timeout in seconds per consumer.poll() call.
+  poll_timeout_s: 1.0
+
+  # Batch mode: number of consecutive empty polls before declaring end-of-topic.
+  # >1 tolerates the initial partition-assignment window (first polls return None).
+  max_empty_polls: 5
+
+  # Progress log every N processed messages.
+  progress_every: 50
+
+  # ── Batch mode ──────────────────────────────────────────────────────────────
+  # Stop after this many records OR when the end of the topic is reached
+  # (a poll_timeout elapses with no new message) — whichever comes first.
+  max_records: 1000
+
+  # Top-K customers by churn probability in the batch summary.
+  top_k: 10
+
+  # Where batch-summary reports (json + md) are written.
+  reports_dir: "artifacts/reports"

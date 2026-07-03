@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from confluent_kafka import Producer
+from confluent_kafka import Consumer, Producer
 
 logger = logging.getLogger(__name__)
 
@@ -82,4 +82,67 @@ def producer_from_config(bootstrap_servers: str | None = None) -> Producer:
         acks=p_cfg.get("acks", "all"),
         linger_ms=int(p_cfg.get("linger_ms", 5)),
         compression_type=p_cfg.get("compression_type", "gzip"),
+    )
+
+
+# ── Consumer ──────────────────────────────────────────────────────────────────
+
+def build_consumer(
+    bootstrap_servers: str,
+    group_id: str,
+    *,
+    auto_offset_reset: str = "earliest",
+    extra: dict[str, Any] | None = None,
+) -> Consumer:
+    """Construct a confluent-kafka Consumer with manual offset commits.
+
+    ``enable.auto.commit`` is disabled so the caller controls exactly when an
+    offset is committed — we commit only *after* a record has been fully
+    processed (scored + published or dead-lettered). This gives at-least-once
+    delivery: a crash mid-processing re-delivers the record rather than
+    silently dropping it.
+
+    Args:
+        bootstrap_servers: Comma-separated host:port list.
+        group_id:          Consumer group id (offsets are tracked per group).
+        auto_offset_reset: Start position when no committed offset exists.
+        extra:             Any additional confluent-kafka config keys to merge.
+
+    Returns:
+        A ready-to-use :class:`confluent_kafka.Consumer`.
+    """
+    conf: dict[str, Any] = {
+        "bootstrap.servers": bootstrap_servers,
+        "group.id": group_id,
+        "auto.offset.reset": auto_offset_reset,
+        "enable.auto.commit": False,
+    }
+    if extra:
+        conf.update(extra)
+
+    logger.debug(
+        "Building Kafka consumer: servers=%s group=%s offset_reset=%s (manual commit)",
+        bootstrap_servers,
+        group_id,
+        auto_offset_reset,
+    )
+    return Consumer(conf)
+
+
+def consumer_from_config(
+    bootstrap_servers: str | None = None,
+    group_id: str | None = None,
+) -> Consumer:
+    """Build a Consumer using settings from configs/kafka.yaml."""
+    kafka_cfg = load_kafka_config()
+    c_cfg = kafka_cfg.get("consumer", {})
+
+    from churnops.config import get_settings
+
+    servers = bootstrap_servers or get_settings().kafka_bootstrap_servers
+    gid = group_id or c_cfg.get("group_id", "churnops-consumer")
+    return build_consumer(
+        servers,
+        gid,
+        auto_offset_reset=c_cfg.get("auto_offset_reset", "earliest"),
     )
