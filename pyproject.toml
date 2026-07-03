@@ -40,7 +40,7 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
-ignore = ["E501"]
+ignore = ["E501", "N803", "N806"]  # N803/N806: X, X_train etc. are standard ML naming convention
 
 [tool.black]
 line-length = 100
