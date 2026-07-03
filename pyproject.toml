@@ -18,6 +18,7 @@ dependencies = [
     "mlflow>=2.13.2",
     "confluent-kafka>=2.4.0",
     "joblib>=1.4.2",
+    "pyspark>=3.5.0,<3.6.0",
 ]
 
 [project.optional-dependencies]
@@ -40,7 +41,7 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
-ignore = ["E501", "N803", "N806"]  # N803/N806: X, X_train etc. are standard ML naming convention
+ignore = ["E501", "N803", "N806", "N812"]  # N803/N806: X, X_train ML naming; N812: `functions as F` is the PySpark convention
 
 [tool.black]
 line-length = 100

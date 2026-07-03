@@ -26,13 +26,25 @@ data/raw/*
 # ── MLflow ────────────────────────────────────────────────────────────────────
 mlruns/
 mlflow-artifacts/
-artifacts/plots/
 
 # ── Saved models / job artefacts ─────────────────────────────────────────────
-artifacts/
+# Ignore everything under artifacts/ by default (contents, not the dir itself)
+# so we can selectively re-include the benchmark report below.
+artifacts/*
 outputs/
 *.pkl
 *.joblib
+
+# Keep the benchmark report (markdown + csv) but not charts or saved models
+!artifacts/reports/
+artifacts/reports/*
+!artifacts/reports/*.md
+!artifacts/reports/*.csv
+
+# ── Spark ─────────────────────────────────────────────────────────────────────
+spark-warehouse/
+metastore_db/
+derby.log
 
 # ── Logs ─────────────────────────────────────────────────────────────────────
 logs/

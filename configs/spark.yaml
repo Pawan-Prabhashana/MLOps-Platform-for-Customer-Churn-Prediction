@@ -1,0 +1,70 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# PySpark MLlib configuration — PARALLEL path to the sklearn model.yaml.
+# Reuses the same processed parquet splits and the same schema column lists
+# (from configs/data.yaml) so Spark vs sklearn is an apples-to-apples compare.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── SparkSession (local mode only — no cluster) ──────────────────────────────
+session:
+  app_name: "churnops-spark"
+  master: "local[*]"
+  # Dev-friendly configs: small shuffle partitions for a ~7k-row toy dataset,
+  # adaptive query execution on, quiet logs.
+  shuffle_partitions: 8
+  adaptive_enabled: true
+  log_level: "WARN"
+
+# Which model to train by default (key from the `models` map below)
+default_model: logistic_regression
+
+models:
+  logistic_regression:
+    class: "pyspark.ml.classification.LogisticRegression"
+    params:
+      maxIter: 100
+      regParam: 0.0
+      elasticNetParam: 0.0
+      # class imbalance handled via a weightCol computed at train time
+    # sklearn counterpart for the benchmark head-to-head
+    sklearn_counterpart: logistic_regression
+
+  random_forest:
+    class: "pyspark.ml.classification.RandomForestClassifier"
+    params:
+      numTrees: 200
+      maxDepth: 10
+      # Spark RF has no class_weight; imbalance handled via weightCol
+    sklearn_counterpart: random_forest
+
+  # GBT = gradient-boosted trees. This is MLlib's stand-in for "XGBoost" —
+  # MLlib has NO native XGBoost. True XGBoost-on-Spark needs the external
+  # `xgboost` PySpark integration (xgboost.spark.SparkXGBClassifier), left
+  # optional here to avoid an extra heavyweight dependency.
+  gbt:
+    class: "pyspark.ml.classification.GBTClassifier"
+    params:
+      maxIter: 100
+      maxDepth: 5
+      stepSize: 0.05
+    sklearn_counterpart: gradient_boosting
+
+# ── Artifact output paths ────────────────────────────────────────────────────
+artifacts:
+  base_dir: "artifacts/spark"          # native Spark model dirs (model.save)
+  model_dir: "model"                   # subdir under base_dir/<model_key>/
+  reports_dir: "artifacts/reports"     # benchmark md/csv/png go here
+
+# ── MLflow (distinct experiment + registered model from the sklearn path) ────
+mlflow:
+  tracking_uri: "http://localhost:3000"
+  experiment_name: "churn-spark"
+  registered_model_name: "churn-classifier-spark"
+  promotion_metric: "test_roc_auc"
+  aliases:
+    staging:    "staging"
+    production: "production"
+  dataset_version: "v1"
+
+# ── Minimum acceptable metric thresholds (used in test assertions) ───────────
+thresholds:
+  roc_auc: 0.78   # slightly looser than sklearn's 0.80 (tiny-tree test configs)

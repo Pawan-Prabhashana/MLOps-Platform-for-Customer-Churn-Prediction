@@ -73,6 +73,57 @@ churnops/
 | `make fmt` | Auto-format with Black + Ruff        |
 | `make lint`| Lint with Ruff                       |
 
+## PySpark MLlib path (parallel to scikit-learn)
+
+A second, independent training path reimplements preprocessing + models with
+Spark DataFrame + MLlib APIs, reusing the **same** processed parquet splits and
+schema column lists so the two are directly comparable.
+
+```bash
+# Train all MLlib models → logs to the "churn-spark" MLflow experiment
+python pipelines/train_spark.py
+
+# Train a single estimator
+python pipelines/train_spark.py --model gbt
+
+# Head-to-head Spark-vs-sklearn benchmark (writes artifacts/reports/*.md + *.csv + charts)
+python pipelines/benchmark_spark.py
+```
+
+- Runs in **local mode only** (`SparkSession` with `master local[*]`) — no cluster.
+- MLlib estimators: `LogisticRegression`, `RandomForestClassifier`, and
+  **GBT (gradient-boosted trees)** — MLlib's stand-in for XGBoost (MLlib has no
+  native XGBoost). True XGBoost-on-Spark needs the external `xgboost` PySpark
+  integration (`xgboost.spark.SparkXGBClassifier`), left optional here.
+- Spark runs log to a distinct experiment (`churn-spark`) and register under a
+  separate model name (`churn-classifier-spark`) so they never collide with the
+  sklearn path.
+
+> **Note on the benchmark.** On this tiny (~7k-row) dataset, Spark's JVM +
+> scheduling overhead usually makes MLlib *slower* than scikit-learn. That is
+> expected — the Spark path is about scaling to data that doesn't fit on one
+> machine, not winning on a toy dataset.
+
+### JDK requirement (Spark needs Java)
+
+Spark requires **Java 8, 11, or 17**. Check what you have:
+
+```bash
+java -version
+```
+
+If Java is missing on macOS, install a supported JDK (17 recommended) with Homebrew:
+
+```bash
+brew install openjdk@17
+# then, if java isn't picked up automatically, expose JAVA_HOME:
+export JAVA_HOME="$(/usr/libexec/java_home -v 17)"
+```
+
+> **Python 3.12+ note.** PySpark 3.5.x still imports the stdlib `distutils`,
+> which was removed in Python 3.12. If you hit `ModuleNotFoundError: No module
+> named 'distutils'`, install the compatibility shim: `pip install "setuptools<81"`.
+
 ## Configuration
 
 Non-secret settings (topic names, ports, paths) live in `configs/app.yaml`.  
