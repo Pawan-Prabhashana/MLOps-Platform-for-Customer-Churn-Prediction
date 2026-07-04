@@ -38,6 +38,10 @@ monitoring = [
     "sqlalchemy>=1.4.36",
     "psycopg2-binary>=2.9.9",
 ]
+dashboard = [
+    "streamlit>=1.36.0",
+    "plotly>=5.22.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

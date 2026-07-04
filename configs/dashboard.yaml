@@ -1,0 +1,54 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Business dashboard configuration — refresh interval, windows, risk bands,
+# and the optional live-scoring widget. Non-secret settings only — the store
+# connection string is DATABASE_URL (see .env / churnops.config.Settings).
+# ─────────────────────────────────────────────────────────────────────────────
+
+server:
+  port: 8501
+
+# ── Data refresh ───────────────────────────────────────────────────────────────
+refresh:
+  # st.cache_data TTL — how long a fetched result is reused before hitting the
+  # DB again. The sidebar "Refresh now" button bypasses this on demand.
+  cache_ttl_seconds: 60
+
+  # "Window" in this dashboard means "most recent N predictions" (the store's
+  # read helpers are limit-based, not date-range based) — offered as a
+  # sidebar selectbox.
+  default_window: 500
+  window_options: [100, 500, 1000, 5000]
+
+# ── Risk bands (top-K table badges + KPI "high risk" count) ──────────────────
+risk:
+  high_threshold: 0.70   # churn_probability > this -> "high" (red)
+  mid_threshold: 0.40    # > this (and <= high) -> "medium" (amber); else "low" (green)
+
+# ── Top-K at-risk table ────────────────────────────────────────────────────────
+top_k:
+  default: 10
+  max: 100
+
+# ── Drift panel ────────────────────────────────────────────────────────────────
+# Mirrors the PSI bands in configs/monitoring.yaml (kept separate on purpose —
+# the dashboard should render sensibly even if the monitoring cycle hasn't
+# run recently and these drift slightly out of sync).
+drift:
+  psi_moderate: 0.10
+  psi_significant: 0.25
+
+# ── Optional live-scoring widget ───────────────────────────────────────────────
+# A "Score a customer" form that POSTs to the FastAPI /predict endpoint.
+# Purely additive — the analytics tabs never depend on the API being up.
+live_scoring:
+  enabled: true
+  api_base_url: "http://localhost:8000"
+  predict_path: "/predict"
+  timeout_s: 5
+
+# ── Theme ─────────────────────────────────────────────────────────────────────
+theme:
+  primary_color: "#4C78A8"
+  high_risk_color: "#D62728"
+  mid_risk_color: "#E8A33D"
+  low_risk_color: "#2CA02C"

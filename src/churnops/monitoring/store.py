@@ -333,24 +333,43 @@ def get_recent_predictions(session: Session, limit: int = 200) -> list[dict[str,
     return [_prediction_to_dict(r) for r in rows]
 
 
+def _latest_per_customer(rows: list[Prediction]) -> list[Prediction]:
+    """Collapse a most-recent-first row list to one (the latest) row per customer_id.
+
+    The demo pipeline frequently re-scores the same customer many times
+    (batch-mode replays of the same CSV rows, or ordinary re-scoring over
+    time) — for customer-population business metrics (churn rate by
+    segment, the top-K action list) that means the same customer, not a
+    fresh one. Event-level helpers (prediction volume, raw recent
+    predictions) deliberately do NOT dedupe — those are about scoring
+    *throughput*, where every event should count.
+    """
+    latest: dict[str, Prediction] = {}
+    for r in rows:
+        if r.customer_id not in latest:
+            latest[r.customer_id] = r
+    return list(latest.values())
+
+
 def get_churn_rate_by_contract(session: Session, limit: int = 5000) -> dict[str, dict[str, float]]:
-    """Churn rate (% predicted 'Yes') grouped by contract type.
+    """Churn rate (% predicted 'Yes') grouped by contract type, one vote per customer.
 
     Rows without a known contract (not yet backfilled by a data-drift run,
-    see collector.py) are bucketed under "Unknown".
+    see collector.py) are bucketed under "Unknown". See ``_latest_per_customer``
+    for why this dedupes to the latest scoring event per customer.
     """
     rows = session.execute(
-        select(Prediction.contract, Prediction.prediction)
+        select(Prediction)
         .order_by(Prediction.processed_ts.desc().nullslast())
         .limit(limit)
-    ).all()
+    ).scalars().all()
 
     buckets: dict[str, dict[str, int]] = {}
-    for contract, pred in rows:
-        key = contract or "Unknown"
+    for r in _latest_per_customer(rows):
+        key = r.contract or "Unknown"
         b = buckets.setdefault(key, {"total": 0, "yes": 0})
         b["total"] += 1
-        if pred == "Yes":
+        if r.prediction == "Yes":
             b["yes"] += 1
 
     return {
@@ -360,12 +379,18 @@ def get_churn_rate_by_contract(session: Session, limit: int = 5000) -> dict[str,
 
 
 def get_top_k_by_probability(session: Session, k: int = 10, limit: int = 5000) -> list[dict[str, Any]]:
+    """Top-K distinct customers by their latest churn_probability.
+
+    See ``_latest_per_customer`` — without this, a repeatedly-rescored
+    customer would occupy multiple slots in what's meant to be a
+    one-row-per-customer action list.
+    """
     rows = session.execute(
         select(Prediction)
         .order_by(Prediction.processed_ts.desc().nullslast())
         .limit(limit)
     ).scalars().all()
-    top = sorted(rows, key=lambda r: r.churn_probability, reverse=True)[:k]
+    top = sorted(_latest_per_customer(rows), key=lambda r: r.churn_probability, reverse=True)[:k]
     return [_prediction_to_dict(r) for r in top]
 
 
@@ -408,6 +433,25 @@ def get_latest_performance(session: Session, limit: int = 20) -> list[dict[str, 
 
 def get_prediction_count(session: Session) -> int:
     return session.execute(select(func.count()).select_from(Prediction)).scalar_one()
+
+
+def get_active_alerts(
+    session: Session, limit: int = 50, unacknowledged_only: bool = True
+) -> list[dict[str, Any]]:
+    """Most recent alerts, unacknowledged by default (the dashboard's action list)."""
+    stmt = select(Alert).order_by(Alert.fired_at.desc()).limit(limit)
+    if unacknowledged_only:
+        stmt = select(Alert).where(Alert.acknowledged.is_(False)).order_by(Alert.fired_at.desc()).limit(limit)
+    rows = session.execute(stmt).scalars().all()
+    return [_alert_to_dict(r) for r in rows]
+
+
+def get_latest_monitoring_run(session: Session) -> dict[str, Any] | None:
+    """The most recent monitoring cycle's summary row, or None if none have run yet."""
+    row = session.execute(
+        select(MonitoringRun).order_by(MonitoringRun.run_ts.desc()).limit(1)
+    ).scalar_one_or_none()
+    return _monitoring_run_to_dict(row) if row else None
 
 
 # ── Row → dict helpers ────────────────────────────────────────────────────────
@@ -456,6 +500,32 @@ def _performance_to_dict(r: PerformanceMetric) -> dict[str, Any]:
     }
 
 
+def _alert_to_dict(r: Alert) -> dict[str, Any]:
+    return {
+        "id": r.id,
+        "fired_at": r.fired_at.isoformat() if r.fired_at else None,
+        "severity": r.severity,
+        "category": r.category,
+        "message": r.message,
+        "metric_value": r.metric_value,
+        "threshold": r.threshold,
+        "acknowledged": r.acknowledged,
+    }
+
+
+def _monitoring_run_to_dict(r: MonitoringRun) -> dict[str, Any]:
+    return {
+        "id": r.id,
+        "run_ts": r.run_ts.isoformat() if r.run_ts else None,
+        "records_processed": r.records_processed,
+        "drift_detected": r.drift_detected,
+        "performance_degraded": r.performance_degraded,
+        "alerts_fired": r.alerts_fired,
+        "status": r.status,
+        "notes": r.notes,
+    }
+
+
 __all__ = [
     "bounded_consume_topic",
     "upsert_predictions",
@@ -473,5 +543,7 @@ __all__ = [
     "get_latest_drift",
     "get_latest_performance",
     "get_prediction_count",
+    "get_active_alerts",
+    "get_latest_monitoring_run",
     "init_db",
 ]

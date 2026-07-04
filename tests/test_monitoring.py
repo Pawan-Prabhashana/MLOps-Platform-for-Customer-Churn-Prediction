@@ -363,6 +363,37 @@ class TestStoreRoundtrip:
         assert len(top) == 3
         assert probs[0] == pytest.approx(0.9)
 
+    def test_top_k_dedupes_repeated_customer_to_latest_event(self, session) -> None:
+        # Same customer re-scored 3 times (e.g. repeated demo batch replays) —
+        # the action list should show them once, not three times.
+        records = [
+            _prediction_record("REPEAT", proba=0.95, minutes_ago=5),
+            _prediction_record("REPEAT", proba=0.90, minutes_ago=3),
+            _prediction_record("REPEAT", proba=0.85, minutes_ago=1),  # most recent
+            _prediction_record("OTHER", proba=0.20, minutes_ago=2),
+        ]
+        store.upsert_predictions(session, records)
+        session.commit()
+
+        top = store.get_top_k_by_probability(session, k=10)
+        repeat_rows = [r for r in top if r["customer_id"] == "REPEAT"]
+        assert len(repeat_rows) == 1
+        assert repeat_rows[0]["churn_probability"] == pytest.approx(0.85)  # the latest, not the highest
+
+    def test_churn_rate_by_contract_dedupes_repeated_customer(self, session) -> None:
+        # Same customer scored twice, most-recent prediction flips Yes -> No.
+        # Only the latest scoring event should count toward the rate.
+        records = [
+            _prediction_record("FLIP", proba=0.90, contract="One year", minutes_ago=2),
+            _prediction_record("FLIP", proba=0.10, contract="One year", minutes_ago=1),  # most recent
+        ]
+        store.upsert_predictions(session, records)
+        session.commit()
+
+        rates = store.get_churn_rate_by_contract(session)
+        assert rates["One year"]["total"] == 1
+        assert rates["One year"]["churn_rate_pct"] == 0.0
+
     def test_backfill_contract_only_fills_missing(self, session) -> None:
         record = _prediction_record("CUST-BF", proba=0.4, contract=None, minutes_ago=0)
         store.upsert_predictions(session, [record])
@@ -374,6 +405,42 @@ class TestStoreRoundtrip:
 
         recent = store.get_recent_predictions(session, limit=10)
         assert recent[0]["contract"] == "One year"
+
+    def test_get_active_alerts_excludes_acknowledged_by_default(self, session) -> None:
+        store.write_alert(session, {
+            "severity": "critical", "category": "drift", "message": "unacked",
+            "metric_value": 0.5, "threshold": 0.25, "acknowledged": False,
+        })
+        store.write_alert(session, {
+            "severity": "warning", "category": "volume", "message": "acked",
+            "metric_value": 1.0, "threshold": 5.0, "acknowledged": True,
+        })
+        session.commit()
+
+        active = store.get_active_alerts(session)
+        assert len(active) == 1
+        assert active[0]["message"] == "unacked"
+
+        everything = store.get_active_alerts(session, unacknowledged_only=False)
+        assert len(everything) == 2
+
+    def test_get_latest_monitoring_run_returns_most_recent(self, session) -> None:
+        assert store.get_latest_monitoring_run(session) is None
+
+        store.write_monitoring_run(session, {
+            "records_processed": 100, "drift_detected": False,
+            "performance_degraded": False, "alerts_fired": 0, "status": "ok", "notes": "first",
+        })
+        session.commit()
+        store.write_monitoring_run(session, {
+            "records_processed": 200, "drift_detected": True,
+            "performance_degraded": False, "alerts_fired": 1, "status": "ok", "notes": "second",
+        })
+        session.commit()
+
+        latest = store.get_latest_monitoring_run(session)
+        assert latest["notes"] == "second"
+        assert latest["records_processed"] == 200
 
 
 # ── collector.py end-to-end ────────────────────────────────────────────────────
