@@ -1,0 +1,32 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# FastAPI real-time serving configuration
+# ─────────────────────────────────────────────────────────────────────────────
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  reload: false          # set true in local dev if you want hot-reload
+  log_level: "info"
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+model:
+  # "registry" loads via MLflow production alias (models:/churn-classifier@production).
+  # "joblib"   loads the local pipeline.joblib artifact directly.
+  # The app always falls back to joblib if the registry is unreachable.
+  source: "registry"
+  threshold: 0.5         # default churn decision threshold P(churn) >= threshold → "Yes"
+
+# ── Batch endpoint ────────────────────────────────────────────────────────────
+batch:
+  max_records: 500       # reject requests larger than this with HTTP 413
+
+# ── CORS ─────────────────────────────────────────────────────────────────────
+cors:
+  # Permissive for local dev; tighten to specific origins in production.
+  allow_origins:
+    - "*"
+  allow_methods:
+    - "*"
+  allow_headers:
+    - "*"
+  allow_credentials: false
