@@ -34,6 +34,10 @@ api = [
     "uvicorn[standard]>=0.30.0",
     "httpx>=0.27.0",
 ]
+monitoring = [
+    "sqlalchemy>=1.4.36",
+    "psycopg2-binary>=2.9.9",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

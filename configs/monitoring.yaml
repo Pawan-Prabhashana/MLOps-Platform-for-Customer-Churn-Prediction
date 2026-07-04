@@ -1,0 +1,108 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Monitoring layer configuration — drift thresholds, reference window,
+# performance baselines, and alert rules.
+# Non-secret settings only — the storage connection string (DATABASE_URL)
+# lives in .env, see churnops.config.Settings.monitoring_database_url.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Ingestion ─────────────────────────────────────────────────────────────────
+ingestion:
+  # Default number of records pulled per monitoring cycle when no --window
+  # flag is given.
+  default_window: 500
+
+  # Consumer group used to read telco.churn.predictions for monitoring.
+  # Deliberately separate from "churnops-consumer" (the scoring consumer) so
+  # monitoring never competes for partitions or perturbs scoring offsets.
+  group_id: "churnops-monitoring"
+
+  poll_timeout_s: 1.0
+  max_empty_polls: 5
+
+# ── Reference data ────────────────────────────────────────────────────────────
+reference:
+  # Training split used as the reference distribution for both prediction
+  # drift (scored with the current production model) and data drift
+  # (raw feature distributions).
+  train_parquet: "data/processed/train.parquet"
+
+# ── Drift detection ───────────────────────────────────────────────────────────
+drift:
+  prediction:
+    # PSI bands (standard): <0.1 none, 0.1-0.25 moderate, >0.25 significant.
+    # is_drifted is flagged when PSI crosses significant_threshold.
+    moderate_threshold: 0.10
+    significant_threshold: 0.25
+    ks_alpha: 0.05
+    # Fewer than this many scored records in the window and prediction drift
+    # is skipped (too noisy to trust).
+    min_sample_size: 30
+    histogram_buckets: 10
+
+  data:
+    # Data drift requires raw feature values. The `predictions` table only
+    # stores {customer_id, churn_probability, prediction, timestamps,
+    # actual_churn} (see monitoring/db.py) — it does NOT carry raw features.
+    # So the "current window" for data drift is obtained by independently
+    # re-consuming a bounded window from telco.raw.customers (the same topic
+    # the scoring consumer reads) under the monitoring consumer group above.
+    # This never touches the scoring consumer's offsets. When Kafka is
+    # unavailable (e.g. --source db, or Kafka down), data drift is skipped
+    # and only prediction drift runs — this is logged explicitly.
+    enabled: true
+    numeric_cols: ["tenure", "MonthlyCharges", "TotalCharges"]
+    categorical_cols:
+      - "Contract"
+      - "InternetService"
+      - "PaymentMethod"
+    psi_threshold: 0.25
+    chi_square_alpha: 0.05
+    min_sample_size: 30
+    histogram_buckets: 10
+
+# ── Performance tracking ──────────────────────────────────────────────────────
+performance:
+  # Only predictions carrying actual_churn (ground truth forwarded by the
+  # consumer) contribute to performance metrics.
+  min_labeled_sample: 20
+
+  # Baseline ROC-AUC to compare the current window against. "config" uses the
+  # fixed value below (matches configs/model.yaml thresholds.roc_auc, the
+  # quality gate the production model already had to clear). Set to "mlflow"
+  # to instead pull the production model version's logged test_roc_auc at
+  # run time.
+  baseline_source: "config"
+  baseline_roc_auc: 0.80
+
+  # Flag performance_degraded when current roc_auc < baseline - tolerance.
+  degradation_tolerance: 0.05
+
+# ── Alerting ──────────────────────────────────────────────────────────────────
+alerts:
+  volume:
+    # Fires a "volume" alert when a monitoring cycle sees fewer/more records
+    # than expected — usually means the pipeline stalled or a producer is
+    # misbehaving.
+    min_records_per_window: 5
+    max_records_per_window: 50000
+
+  # Severity bands, scaled by how far past threshold the breach is:
+  # "info" below threshold * info_multiplier, "warning" up to
+  # threshold * critical_multiplier, "critical" beyond that.
+  severity:
+    info_multiplier: 1.2
+    critical_multiplier: 2.0
+
+  # Hooks — the plain logger sink always runs. Slack/SMTP are opt-in stubs;
+  # each is one line to wire up once credentials exist.
+  hooks:
+    slack_webhook_env: "SLACK_WEBHOOK_URL"
+    smtp_enabled: false
+
+# ── Airflow retrain trigger (opt-in) ──────────────────────────────────────────
+# When true, the monitoring DAG fires TriggerDagRunOperator against
+# churn_retrain whenever a monitoring cycle reports drift_detected=True.
+# Default OFF so drift alone never silently kicks off an unattended retrain.
+retrain_trigger:
+  enabled: false
+  dag_id: "churn_retrain"

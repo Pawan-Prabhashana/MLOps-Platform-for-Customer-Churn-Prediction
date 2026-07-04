@@ -60,6 +60,13 @@ artifacts/reports/batch_summary.md
 # Consumer run logs (if redirected to a file)
 consumer_*.log
 
+# ── Monitoring layer ──────────────────────────────────────────────────────────
+# Local/dev-only SQLite files if DATABASE_URL is ever pointed at one (the
+# default is the docker-compose Postgres, not a file), plus monitoring logs.
+monitoring_*.log
+run_monitoring_*.log
+*.sqlite3
+
 # ── Logs ─────────────────────────────────────────────────────────────────────
 logs/
 *.log

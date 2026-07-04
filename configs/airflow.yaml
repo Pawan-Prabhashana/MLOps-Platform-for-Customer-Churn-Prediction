@@ -1,0 +1,43 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Airflow orchestration configuration
+# Referenced by both DAGs and dags/utils/. All values here are defaults;
+# Airflow Variables (set in the UI or via CLI) override them at runtime:
+#   airflow variables set CHURN_ROC_AUC_GATE 0.80
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Schedules ─────────────────────────────────────────────────────────────────
+retrain_schedule: "@daily"          # churn_retrain DAG
+streaming_schedule: "*/30 * * * *"  # churn_streaming DAG (every 30 minutes)
+monitoring_schedule: "*/15 * * * *" # churn_monitoring DAG (every 15 minutes)
+
+# ── Monitoring cycle ───────────────────────────────────────────────────────────
+# Records pulled per scheduled monitoring cycle (see configs/monitoring.yaml
+# for drift/performance/alert thresholds).
+monitoring_window: 500
+
+# ── Quality gate ──────────────────────────────────────────────────────────────
+# evaluate_and_gate raises AirflowSkipException when the best val ROC-AUC
+# across all newly trained models is below this threshold.
+roc_auc_gate: 0.78
+
+# ── Consumer (bounded pulse) ──────────────────────────────────────────────────
+# Max Kafka records the streaming DAG's run_bounded_consumer task consumes.
+bounded_consumer_max_records: 200
+
+# ── Task defaults ─────────────────────────────────────────────────────────────
+task_timeout_minutes: 30    # execution_timeout per task
+task_retries: 1
+task_retry_delay_minutes: 5
+
+# ── Email notifications (stub — set email to enable) ─────────────────────────
+email_on_failure: false
+email_on_retry: false
+email: []  # e.g. ["mlops@example.com"]
+
+# ── MLflow ────────────────────────────────────────────────────────────────────
+# The DAGs read the tracking URI from the environment (MLFLOW_TRACKING_URI).
+# This entry is only a fallback for local non-Docker runs.
+mlflow_tracking_uri: "http://localhost:3000"
+
+# ── FastAPI ───────────────────────────────────────────────────────────────────
+api_health_url: "http://localhost:8000/health"

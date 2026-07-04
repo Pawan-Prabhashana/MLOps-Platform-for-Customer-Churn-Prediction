@@ -107,6 +107,23 @@ class Settings(BaseSettings):
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_churnops_db}"
         )
 
+    # ── Monitoring store (predictions / drift / performance / alerts) ────────
+    # Set DATABASE_URL in .env to point the monitoring layer at a real Supabase
+    # project (Settings → Database → Connection string) instead of the local
+    # docker Postgres. Both are plain Postgres, so no code changes are needed —
+    # only this connection string. Left empty by default, which falls back to
+    # the local `churnops` database via churnops_db_uri.
+    database_url: str = Field(default="")
+
+    @property
+    def monitoring_database_url(self) -> str:
+        """Connection string used by the monitoring layer (src/churnops/monitoring).
+
+        Resolution order: DATABASE_URL env var (e.g. a Supabase connection
+        string) → local docker-compose `churnops` Postgres database.
+        """
+        return self.database_url or self.churnops_db_uri
+
     @field_validator("raw_data_dir", "processed_data_dir", "artifacts_dir", mode="before")
     @classmethod
     def _coerce_path(cls, v: object) -> Path:

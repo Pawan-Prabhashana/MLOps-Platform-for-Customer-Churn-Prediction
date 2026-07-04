@@ -19,9 +19,44 @@ x-airflow-common: &airflow-common
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__LOGGING__BASE_LOG_FOLDER: /opt/airflow/logs
+    # ── churnops package access (Option a: mount + PYTHONPATH) ─────────────
+    # src/ is bind-mounted at /opt/airflow/src so `import churnops` works
+    # without rebuilding the Airflow image.  dags/ is on the path so the
+    # `utils` sub-package (alerts, metrics) is importable by the DAG tasks.
+    PYTHONPATH: "/opt/airflow/src:/opt/airflow/dags"
+    # Runtime connection settings consumed by churnops.config / the DAG tasks.
+    MLFLOW_TRACKING_URI: "http://mlflow:5000"
+    KAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
+    # API health URL using Docker container name (not localhost) so health checks
+    # work from inside the Airflow container network.
+    API_HEALTH_URL: "http://api:8000/health"
+    # Postgres host/port as seen from inside the compose network (not the
+    # 5433 host-mapped port) — used by the churn_monitoring DAG's default
+    # monitoring_database_url (churnops.config.Settings). Overridden entirely
+    # by DATABASE_URL if you point the monitoring layer at Supabase instead.
+    POSTGRES_HOST: "postgres"
+    POSTGRES_PORT: "5432"
+    # Auto-install churnops runtime deps into the Airflow container on first
+    # start (no custom Dockerfile required).  Remove packages that are already
+    # bundled with the base image to speed up subsequent restarts.
+    # sqlalchemy + psycopg2 (churn_monitoring DAG's dependencies) are already
+    # bundled with the base apache-airflow image — Airflow's own metadata DB
+    # connection needs them — so they're deliberately NOT listed below.
+    # Adding an unpinned "sqlalchemy" here would risk a future upgrade past
+    # the <2.0 ceiling apache-airflow 2.9.2 requires.
+    _PIP_ADDITIONAL_REQUIREMENTS: >-
+      mlflow scikit-learn pandas pyarrow pyyaml
+      confluent-kafka pydantic pydantic-settings joblib
   volumes:
     - ./dags:/opt/airflow/dags
     - airflow_logs:/opt/airflow/logs
+    # Bind-mount the entire repo sub-trees the DAG tasks need to access.
+    # _REPO_ROOT inside the container resolves to /opt/airflow (parent of dags/).
+    - ./src:/opt/airflow/src               # churnops Python package
+    - ./configs:/opt/airflow/configs       # configs/airflow.yaml, model.yaml, etc.
+    - ./pipelines:/opt/airflow/pipelines   # build_dataset.py, train_mlflow.py, …
+    - ./data:/opt/airflow/data             # raw CSV + processed parquet splits
+    - ./artifacts:/opt/airflow/artifacts   # reports, model artifacts
   depends_on:
     postgres:
       condition: service_healthy
@@ -116,6 +151,12 @@ services:
       dockerfile: Dockerfile.mlflow
     image: churnops-mlflow:local
     container_name: churnops-mlflow
+    environment:
+      # Allow calls from Docker container-internal hostnames (e.g. mlflow:5000
+      # from the Airflow containers). Without this, MLflow 3.14+ rejects requests
+      # with non-localhost Host headers as DNS-rebinding protection.
+      MLFLOW_ENABLE_HOSTNAME_HEADER_CHECK: "false"
+      MLFLOW_SERVER_ALLOWED_HOSTS: "*"
     command:
       - "--backend-store-uri"
       - "postgresql+psycopg2://churnops:churnops_secret@postgres:5432/mlflow"
